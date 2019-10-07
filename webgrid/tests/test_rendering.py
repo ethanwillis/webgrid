@@ -491,6 +491,36 @@ class TestHtmlRenderer(object):
 
         TestGrid().html()
 
+    @inrequest('/thepage?search=foo')
+    def test_render_search_filter(self):
+        g = PeopleGrid()
+        g.enable_search = True
+
+        filter_html = g.html.filtering_fields()
+        assert '<input id="search_input" name="search" type="text" />' in filter_html
+
+        g.apply_qs_args()
+        filter_html = g.html.filtering_fields()
+        assert '<input id="search_input" name="search" type="text" value="foo" />' in filter_html
+
+    def test_search_disabled(self):
+        class PeopleGrid2(PeopleGrid):
+            enable_search = False
+
+        g = PeopleGrid2()
+
+        filter_html = g.html.filtering_fields()
+        assert '<input id="search_input"' not in filter_html
+
+    def test_no_searchable_columns(self):
+        class TGrid(Grid):
+            enable_search = True
+            Column('Test', Person.id)
+
+        tg = TGrid()
+        filter_html = tg.html.filtering_fields()
+        assert '<input id="search_input"' not in filter_html
+
 
 class PGPageTotals(PeopleGrid):
     subtotals = 'page'

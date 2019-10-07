@@ -15,11 +15,13 @@ from blazeutils.strings import case_cw2us, randchars
 from blazeutils.spreadsheets import xlsxwriter
 from formencode import Invalid
 import formencode.validators as fev
+import sqlalchemy as sa
 import sqlalchemy.sql as sasql
 from webhelpers2.html.tags import link_to
 from werkzeug.datastructures import MultiDict
 
 from .extensions import gettext as _
+from .filters import TextFilter
 from .renderers import HTML, XLS, XLSX
 
 # conditional imports to support libs without requiring them
@@ -515,6 +517,7 @@ class BaseGrid(six.with_metaclass(_DeclarativeMeta, object)):
     subtotals = 'none'
     manager = None
     allowed_export_targets = None
+    enable_search = False
 
     # Will ask for confirmation before exporting more than this many records.
     # Set to None to disable this check
@@ -531,6 +534,7 @@ class BaseGrid(six.with_metaclass(_DeclarativeMeta, object)):
         self.order_by = []
         self.qs_prefix = qs_prefix
         self.user_warnings = []
+        self.search_value = None
         self._record_count = None
         self._records = None
         self._page_totals = None
@@ -613,6 +617,14 @@ class BaseGrid(six.with_metaclass(_DeclarativeMeta, object)):
             if render_type in col.render_in:
                 yield col
 
+    def can_search(self):
+        return self.enable_search and len(self.searchable_cols) > 0
+
+    @property
+    def searchable_cols(self):
+        # only use columns with a text filter so we can be sure the contains operator makes sense
+        return [col for col in self.columns if isinstance(col.filter, TextFilter)]
+
     def set_renderers(self):
         self.html = HTML(self)
         for key, value in self.allowed_export_targets.items():
@@ -658,7 +670,7 @@ class BaseGrid(six.with_metaclass(_DeclarativeMeta, object)):
         for col in six.itervalues(self.filtered_cols):
             if col.filter.is_active:
                 return True
-        return False
+        return self.search_value is not None
 
     @property
     def has_sort(self):
@@ -753,10 +765,18 @@ class BaseGrid(six.with_metaclass(_DeclarativeMeta, object)):
         return query
 
     def query_filters(self, query):
+        if self.search_value is not None:
+            query = self.apply_search(query, self.search_value)
+
         for col in six.itervalues(self.filtered_cols):
             if col.filter.is_active:
                 query = col.filter.apply(query)
         return query
+
+    def apply_search(self, query, value):
+        return query.filter(sa.or_(*(
+            col.filter.sa_col.ilike('%{}%'.format(value)) for col in self.searchable_cols)
+        ))
 
     def query_paging(self, query):
         if self.on_page and self.per_page:
@@ -805,6 +825,9 @@ class BaseGrid(six.with_metaclass(_DeclarativeMeta, object)):
             return any(r.match(a) for a in args.keys())
 
         args = MultiDict(self.manager.request_args())
+        if 'search' in args and self.can_search():
+            self.search_value = args['search'].strip()
+
         # args are pulled first from the request. If the session feature
         #   is enabled and the request doesn't include grid-related args,
         #   check for either the session key or a default set in the

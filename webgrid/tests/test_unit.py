@@ -304,6 +304,17 @@ class TestGrid(object):
         except ValueError as exc:
             eq_(str(exc), 'No export format set')
 
+    def test_search_query(self):
+        class CTG(Grid):
+            Column('First Name', Person.firstname, TextFilter)
+            Column('Last Name', Person.lastname, TextFilter)
+
+        g = CTG()
+        g.search_value = 'foo'
+        search_where = ("WHERE lower(persons.firstname) LIKE lower('%foo%')"
+                        " OR lower(persons.last_name) LIKE lower('%foo%')")
+        assert_in_query(g, search_where)
+
 
 class TestQueryStringArgs(object):
 
@@ -601,3 +612,27 @@ class TestQueryStringArgs(object):
         g = TGrid()
         g.apply_qs_args()
         eq_(g.user_warnings[0], 'T: Please enter an integer value')
+
+    @inrequest('/foo?search=bar')
+    def test_qs_search(self):
+        g = PeopleGrid()
+        g.enable_search = True
+        g.apply_qs_args()
+        eq_(g.search_value, 'bar')
+
+    @inrequest('/foo?search=bar')
+    def test_qs_search_disabled(self):
+        g = PeopleGrid()
+        g.enable_search = False
+        g.apply_qs_args()
+        assert g.search_value is None
+
+    @inrequest('/foo?search=bar')
+    def test_qs_no_searchable_columns(self):
+        class TG(Grid):
+            Column('First Name', Person.firstname)
+
+        g = TG()
+        g.enable_search = True
+        g.apply_qs_args()
+        assert g.search_value is None
